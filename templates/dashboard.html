@@ -1,0 +1,1076 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h3>欢迎, {{ current_user.username }}!</h3>
+    </div>
+    <div class="card-body">
+
+        <div class="row">
+            <div class="col-md-6">
+                <h4>个人信息</h4>
+                <ul class="list-group">
+                    <li class="list-group-item">
+                        <strong>用户名:</strong> {{ current_user.username }}
+                    </li>
+                    <li class="list-group-item">
+                        <strong>标识符:</strong> 
+                        {% if current_user.identifier %}
+                            {{ current_user.identifier }}
+                        {% else %}
+                            <em>未设置</em>
+                        {% endif %}
+                    </li>
+                    <li class="list-group-item">
+                        <strong>账户类型:</strong> 
+                        {% if current_user.is_admin %}
+                            管理员
+                        {% else %}
+                            普通用户
+                            {% if current_user.client_mode.value == 'download' %}
+                                (下载模式)
+                            {% else %}
+                                (网页解析模式)
+                            {% endif %}
+                        {% endif %}
+                    </li>
+                    <li class="list-group-item">
+                        <strong>需求单量:</strong> <span data-info="order-count">{{ current_user.order_count }}</span>
+                        {% if not current_user.is_admin %}
+                        <button class="btn btn-sm btn-primary float-end" id="incrementOrderBtn" onclick="incrementOrderCount()" {% if current_user.order_count >= current_user.max_devices %}disabled title="已达同时接单上限"{% endif %}>
+                            需求一单
+                        </button>
+                        <span class="text-danger ms-2" id="orderLimitTip" {% if current_user.order_count < current_user.max_devices %}style="display:none;"{% endif %}>（已达同时接单上限）</span>
+                        {% endif %}
+                    </li>
+                </ul>
+            </div>
+
+            <!-- 通知栏位置 -->
+            <div class="col-md-6">
+                <h4>通知栏</h4>
+                <div class="card border-primary">
+                    <div class="card-body notification-board text-muted" style="min-height: 100px; border-radius: 5px; padding: 15px; font-size: 1.1rem; border-left: 4px solid #0d6efd; position: relative;">
+                        <span id="notificationBarContent">暂无通知</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {% if not current_user.is_admin %}
+        <div class="row mt-4">
+            <div class="col-12">
+                <h4>我的文件</h4>
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>文件名</th>
+                                <th>金额</th>
+                                <th>数量</th>
+                                <th>状态</th>
+                                <th>上传时间</th>
+                                <th>备注</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for file in files.items %}
+                            <tr data-file-id="{{ file.id }}" class="{{ file.status.value }}">
+                                <td>{{ file.display_id }}</td>
+                                <td>
+                                    {{ file.filename }}
+                                </td>
+                                <td>{{ file.amount }}元</td>
+                                <td>{{ file.count }}张</td>
+                                <td>
+                                    <span class="badge bg-{{ {
+                                        'pending': 'warning',
+                                        'received': 'info',
+                                        'completed': 'success',
+                                        'revoked': 'danger'
+                                    }[file.status.value] }} status-badge">
+                                        {{ {
+                                            'pending': '待接收',
+                                            'received': '已接收',
+                                            'completed': '已完成',
+                                            'revoked': '已撤回'
+                                        }[file.status.value] }}
+                                    </span>
+                                </td>
+                                <td>{{ file.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>
+                                    <span class="file-note-display" title="{{ file.note or '无' }}">
+                                        {{ file.note or '无' }}
+                                    </span>
+                                </td>
+                                <td>
+                                    {% if file.status.value not in ['revoked'] %}
+                                        {% if current_user.client_mode.value == 'download' %}
+                                            {# 下载模式：显示下载和已完成按钮 #}
+                                            {% if file.status.value == 'pending' or file.can_download() %}
+                                                <button class="btn btn-sm btn-primary" 
+                                                        onclick="downloadFile({{ file.id }})">
+                                                    下载
+                                                </button>
+                                            {% endif %}
+                                            {% if file.status.value == 'received' %}
+                                                <button class="btn btn-sm btn-success"
+                                                        onclick="updateFileStatus({{ file.id }}, 'completed')">
+                                                    已完成
+                                                </button>
+                                            {% endif %}
+                                        {% else %}
+                                            {# 网页解析模式：显示展示按钮 #}
+                                            {% if file.status.value == 'pending' or file.status.value == 'received' %}
+                                                {% if file.view_enabled %}
+                                                <button class="btn btn-sm btn-primary" 
+                                                        onclick="showFile({{ file.id }})">
+                                                    展示
+                                                </button>
+                                                {% else %}
+                                                <button class="btn btn-sm btn-secondary" disabled
+                                                        title="文件已被查看，请联系管理员重置">
+                                                    已查看
+                                                </button>
+                                                {% endif %}
+                                            {% endif %}
+                                            {% if file.status.value == 'completed' and file.can_download() %}
+                                                <button class="btn btn-sm btn-info" 
+                                                        onclick="downloadFile({{ file.id }})">
+                                                    下载
+                                                </button>
+                                            {% endif %}
+                                        {% endif %}
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+
+                    <!-- 分页导航 -->
+                    {% if files.pages > 1 %}
+                    <nav aria-label="Page navigation">
+                        <ul class="pagination justify-content-center"></ul>
+                    </nav>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+<!-- 网页解析模式的展示模态框 -->
+<div class="modal fade" id="fileViewerModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">文件展示</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+                <!-- 新增倒计时显示 -->
+                <div id="countdownTimer" style="font-size:1rem;font-weight:bold;color:#ff5555;margin-bottom:8px;"></div>
+                <!-- HTML渲染模式的内容 -->
+                <div id="htmlContent" class="mb-1">
+                    <div class="card border-primary mb-1">
+                        <div class="card-header bg-primary text-white py-1">
+                            <h4 id="fileTitle" class="m-0" style="font-size: 1rem;">标题加载中...</h4>
+                            <span id="fileSubtitle" class="small" style="font-size: 0.8rem;">详情加载中...</span>
+                        </div>
+                        <div class="card-body p-0" style="position: relative;">
+                            <!-- 左侧翻页按钮 -->
+                            <div style="position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 100;">
+                                <button class="btn btn-lg btn-success" style="padding: 25px 10px; border-radius: 0 5px 5px 0;" onclick="prevImage(); event.stopPropagation();">
+                                    <i class="fas fa-chevron-left"></i><br>上<br>一<br>页
+                                </button>
+                            </div>
+                            
+                            <!-- 右侧翻页按钮 -->
+                            <div style="position: absolute; right: 0; top: 50%; transform: translateY(-50%); z-index: 100;">
+                                <button class="btn btn-lg btn-success" style="padding: 25px 10px; border-radius: 5px 0 0 5px;" onclick="nextImage(); event.stopPropagation();">
+                                    <i class="fas fa-chevron-right"></i><br>下<br>一<br>页
+                                </button>
+                            </div>
+                            
+                            <div id="fileSelections" class="mb-2 px-5 py-2" style="font-size: 1.1rem;">
+                                <p class="text-muted text-center">选项内容加载中...</p>
+                            </div>
+                            
+                            <h5 id="fileAmount" class="text-center fw-bold mb-0" style="font-size: 0.85rem;">金额计算中...</h5>
+                        </div>
+                        <div class="text-center py-1">
+                            <small id="htmlPageIndicator" class="text-muted" style="font-size: 0.8rem;">第 0 页，共 0 页</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="progress mb-1" style="height: 5px;">
+                    <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" 
+                         role="progressbar" style="width: 0%">
+                    </div>
+                </div>
+                
+                <div class="text-center py-1">
+                    <span id="pageIndicator" class="btn btn-light btn-sm" style="font-size: 0.8rem; padding: 0.25rem 0.5rem;">第 1 页，共 1 页</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 客户页面已删除备注编辑功能，仅保留备注查看 -->
+
+{% if not current_user.is_admin %}
+<script>
+let currentPage = 1;
+let lastData = null;
+let currentEditingFileId = null;
+let userClientMode = "{{ current_user.client_mode.value }}"; // 存储用户的客户端模式
+let lastPageSelections = null; // 记录上一页的selections
+let lastPageNum = null;        // 记录上一页的页码
+// 全局变量
+let lastNotificationId = null;
+
+// 状态与样式映射
+const statusBadgeMap = {
+    'pending': 'warning',
+    'received': 'info',
+    'completed': 'success',
+    'revoked': 'danger'
+};
+const statusTextMap = {
+    'pending': '待接收',
+    'received': '已接收',
+    'completed': '已完成',
+    'revoked': '已撤回'
+};
+
+function downloadFile(fileId) {
+    // 检查文件状态，判断是否需要更新状态
+    fetch(`/api/files/list?page=1&t=${Date.now()}`)
+    .then(response => response.json())
+    .then(data => {
+        // 查找当前文件
+        const file = data.files.find(f => f.id === fileId);
+        if (!file) {
+            throw new Error('找不到指定的文件');
+        }
+        const isCompleted = file.status === 'completed';
+        return fetch(`/api/files/${fileId}/download`)
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(errorData => {
+                    throw new Error(errorData.error || '下载失败，服务器返回错误');
+                }).catch(e => {
+                    throw new Error(`下载失败 (${response.status}: ${response.statusText})`);
+                });
+            }
+            const contentType = response.headers.get('Content-Type');
+            if (contentType && contentType.includes('application/json')) {
+                return response.json().then(errorData => {
+                    throw new Error(errorData.error || '下载失败，无法获取文件');
+                });
+            }
+            let filename = '';
+            const contentDisposition = response.headers.get('Content-Disposition');
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+                if (filenameMatch && filenameMatch[1]) {
+                    filename = decodeURIComponent(filenameMatch[1]);
+                } else {
+                    const asciiFilenameMatch = contentDisposition.match(/filename="([^"]+)"/i);
+                    if (asciiFilenameMatch && asciiFilenameMatch[1]) {
+                        filename = asciiFilenameMatch[1];
+                    }
+                }
+            }
+            if (!filename) {
+                filename = `文件_${fileId}.txt`;
+            }
+            return response.blob().then(blob => {
+                if (blob.size === 0) {
+                    throw new Error('下载的文件内容为空');
+                }
+                return { blob, filename, isCompleted };
+            });
+        });
+    })
+    .then(({ blob, filename, isCompleted }) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        if (!isCompleted) {
+            // 立即切换按钮为已完成
+            updateFileStatus(fileId, 'received').then(() => {
+                // 只更新当前行按钮
+                const row = document.querySelector(`tr[data-file-id='${fileId}']`);
+                if (row) {
+                    const opTd = row.querySelector('td:last-child');
+                    if (opTd) {
+                        opTd.innerHTML = `<button class="btn btn-sm btn-success" onclick="updateFileStatus(${fileId}, 'completed')">已完成</button>`;
+                    }
+                }
+            });
+        }
+        return Promise.resolve();
+    })
+    .catch(error => {
+        console.error('下载文件时出错:', error);
+        if (error.message.includes('文件不存在') || error.message.includes('不可下载')) {
+            alert(error.message);
+        } else if (error.message.includes('2小时')) {
+            alert('文件当前不可下载，请等待2小时后再试');
+        } else {
+            alert('下载失败，请稍后重试。如果问题持续存在，请联系管理员。');
+        }
+    });
+}
+
+// 存储当前页面的数据
+let currentFileData = null;
+
+// 更新HTML内容的函数
+function updateHTMLContent(data, pageNum) {
+    if (!data.text_content) return;
+    
+    const textContent = data.text_content;
+    const filename = textContent.filename_data;
+    
+    // ====== 新增倒计时渲染 ======
+    const deadline = filename.deadline;
+    const countdownDiv = document.getElementById('countdownTimer');
+    if (countdownDiv) {
+        if (deadline) {
+            if (window.countdownInterval) clearInterval(window.countdownInterval);
+            function updateCountdown() {
+                const now = new Date();
+                const [h, m] = deadline.split('.').map(Number);
+                
+                // 先假设是今天的截止时间
+                let deadlineTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0);
+                
+                // 如果截止时间已经过了，说明是明天的
+                if (deadlineTime <= now) {
+                    deadlineTime = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, h, m, 0);
+                }
+                
+                let diff = Math.floor((deadlineTime - now) / 1000);
+                if (diff < 0) {
+                    countdownDiv.textContent = '已截止';
+                    countdownDiv.classList.add('text-danger');
+                    clearInterval(window.countdownInterval);
+                } else {
+                    const hh = String(Math.floor(diff / 3600)).padStart(2, '0');
+                    const mm = String(Math.floor((diff % 3600) / 60)).padStart(2, '0');
+                    const ss = String(diff % 60).padStart(2, '0');
+                    countdownDiv.textContent = `倒计时：${hh}:${mm}:${ss}`;
+                    countdownDiv.classList.remove('text-danger');
+                }
+            }
+            updateCountdown();
+            window.countdownInterval = setInterval(updateCountdown, 1000);
+        } else {
+            countdownDiv.textContent = '';
+        }
+    }
+    // ====== 新增倒计时渲染结束 ======
+    
+    // 更新标题和副标题
+    document.getElementById('fileTitle').textContent = `${filename.identifier} ${filename.content}`;
+    document.getElementById('fileSubtitle').textContent = `金额 ${filename.amount} 元，共 ${filename.quantity} 张`;
+    
+    // 更新选项内容
+    const selectionsContainer = document.getElementById('fileSelections');
+    const currentSelections = textContent.selections || [];
+    let prevSelections = lastPageSelections;
+    let prevPage = lastPageNum;
+    // 只在第二页及以后做对比
+    const showCompare = (typeof pageNum === 'number' && pageNum > 0 && Array.isArray(prevSelections));
+    let compareResult = [];
+    if (showCompare) {
+        // 只对比长度相同的部分
+        for (let i = 0; i < currentSelections.length; i++) {
+            if (prevSelections[i] && currentSelections[i].match_number !== prevSelections[i].match_number) {
+                compareResult[i] = true; // 该位置场次发生变化
+            } else {
+                compareResult[i] = false;
+            }
+        }
+    }
+    if (currentSelections.length > 0) {
+        const playTypeColors = getPlayTypeColors(filename.content);
+        const selectionsHTML = currentSelections.map(function(sel, idx) {
+            var choicesHTML = [];
+            for (var i = 0; i < sel.choices.length; i += 4) {
+                var rowChoices = sel.choices.slice(i, i + 4);
+                var rowHTML = rowChoices.map(function(choice) {
+                    return '<span class="badge ' + playTypeColors.resultBadge + ' m-1" style="font-size: 1.0rem">' + choice + '</span>';
+                }).join('');
+                choicesHTML.push('<div class="d-flex flex-wrap justify-content-center mb-1">' + rowHTML + '</div>');
+            }
+            var notice = '';
+            if (showCompare && compareResult[idx]) {
+                notice = '<span class="badge bg-danger" style="font-size:1.0rem;vertical-align:middle;">⚠️ 场次已变更！</span>';
+            }
+            // 场次严格居中，警告绝对定位右侧且不影响居中
+            return '<div class="card mb-0 mt-1 border-' + playTypeColors.matchBorder + '">' +
+                '<div class="card-header ' + playTypeColors.matchHeader + ' py-1 px-2 position-relative">' +
+                '<div class="w-100 text-center">' +
+                '<strong style="font-size: 1.1rem;">场次 [' + sel.match_number + ']</strong>' +
+                '</div>' +
+                (notice ? '<span class="position-absolute" style="right: 16px; top: 50%; transform: translateY(-50%);">' + notice + '</span>' : '') +
+                '</div>' +
+                '<div class="card-body py-0 px-2 ' + playTypeColors.matchBody + '">' +
+                choicesHTML.join("") +
+                '</div>' +
+                '</div>';
+        }).join('');
+        selectionsContainer.innerHTML = selectionsHTML;
+    } else {
+        selectionsContainer.innerHTML = '<p class="text-center text-primary">没有选项数据</p>';
+    }
+    
+    // 根据玩法类型获取对应的颜色样式
+    function getPlayTypeColors(content) {
+        // 默认颜色
+        const defaultColors = {
+            matchHeader: 'bg-primary text-white',
+            matchBody: 'bg-light',
+            matchBorder: 'primary',
+            resultBadge: 'bg-info text-white'
+        };
+        
+        console.log('检测玩法类型:', content);
+        
+        // 确保content是字符串
+        if (!content || typeof content !== 'string') {
+            console.warn('玩法类型无效或为空:', content);
+            return defaultColors;
+        }
+        
+        // 判断玩法类型 - 使用更准确的检测
+        if (content.indexOf('胜平负') !== -1) {
+            console.log('检测到胜平负玩法');
+            return {
+                matchHeader: 'bg-primary bg-opacity-75 text-white',
+                matchBody: 'bg-light',
+                matchBorder: 'primary',
+                resultBadge: 'bg-info text-white'
+            };
+        } else if (content.indexOf('半全场') !== -1) {
+            console.log('检测到半全场玩法');
+            return {
+                matchHeader: 'bg-success bg-opacity-75 text-white',
+                matchBody: 'bg-light',
+                matchBorder: 'success',
+                resultBadge: 'bg-success bg-opacity-75 text-white'
+            };
+        } else if (content.indexOf('比分') !== -1) {
+            console.log('检测到比分玩法');
+            return {
+                matchHeader: 'bg-danger bg-opacity-75 text-white',
+                matchBody: 'bg-light',
+                matchBorder: 'danger',
+                resultBadge: 'bg-danger bg-opacity-75 text-white'
+            };
+        } else if (content.indexOf('上下盘') !== -1) {
+            console.log('检测到上下盘玩法');
+            return {
+                matchHeader: 'bg-warning bg-opacity-75 text-dark',
+                matchBody: 'bg-light',
+                matchBorder: 'warning',
+                resultBadge: 'bg-warning bg-opacity-75 text-dark'
+            };
+        } else if (content.indexOf('胜负') !== -1) {
+            console.log('检测到胜负玩法');
+            return {
+                matchHeader: 'bg-info bg-opacity-75 text-dark',
+                matchBody: 'bg-light',
+                matchBorder: 'info',
+                resultBadge: 'bg-info bg-opacity-75 text-dark'
+            };
+        } else if (content.indexOf('总进球') !== -1) {
+            console.log('检测到总进球玩法');
+            return {
+                matchHeader: 'bg-dark bg-opacity-75 text-white',
+                matchBody: 'bg-light',
+                matchBorder: 'dark',
+                resultBadge: 'bg-dark bg-opacity-75 text-white'
+            };
+        }
+        
+        console.log('未识别的玩法类型，使用默认颜色');
+        return defaultColors;
+    }
+    
+    // 更新金额
+    const amountElement = document.getElementById('fileAmount');
+    if (textContent.calculated_amount !== null) {
+        amountElement.textContent = `总金额: ${textContent.calculated_amount} 元`;
+        amountElement.classList.add('text-success');
+    } else {
+        amountElement.textContent = '金额计算失败';
+        amountElement.classList.add('text-danger');
+    }
+    
+    // 更新页码指示器
+    document.getElementById('htmlPageIndicator').textContent = 
+        `第 ${data.current_page + 1} 页，共 ${data.total_pages} 页`;
+    
+    // 渲染完后，记录本页selections和页码
+    lastPageSelections = currentSelections;
+    lastPageNum = pageNum;
+}
+
+function showFile(fileId) {
+    currentFileId = fileId;
+    loadPage(0);
+}
+
+function prevImage() {
+    if (currentPage > 0) {
+        loadPage(currentPage - 1);
+    }
+}
+
+function nextImage() {
+    if (currentPage < totalPages - 1) {
+        loadPage(currentPage + 1);
+    }
+}
+
+function loadPage(page) {
+    // 添加加载状态提示
+    const loadingToast = document.createElement('div');
+    loadingToast.className = 'position-fixed top-50 start-50 translate-middle bg-dark text-white p-3 rounded';
+    loadingToast.style.zIndex = '9999';
+    loadingToast.textContent = '加载中...';
+    document.body.appendChild(loadingToast);
+
+    // 设置超时时间
+    const timeout = 10000; // 10秒
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    fetch(`/api/files/${currentFileId}/page/${page}`, {
+        signal: controller.signal,
+        headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+        }
+    })
+    .then(response => {
+        clearTimeout(timeoutId);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        // 保存当前页面数据
+        currentFileData = data;
+        currentPage = data.current_page;
+        totalPages = data.total_pages;
+        
+        // 更新HTML内容，传递当前页码
+        updateHTMLContent(data, page);
+        
+        // 更新页码和进度条
+        updatePageIndicator();
+        updateProgress(currentPage, totalPages);
+        
+        // 首次加载时显示模态框
+        if (page === 0) {
+            const modal = new bootstrap.Modal(document.getElementById('fileViewerModal'));
+            modal.show();
+        }
+
+        // 清除所有现有的完成按钮
+        const existingCompleteButtons = document.querySelectorAll('.complete-button');
+        existingCompleteButtons.forEach(button => button.remove());
+
+        // 如果是最后一页，显示完成按钮
+        if (currentPage === totalPages - 1) {
+            const completeButton = document.createElement('button');
+            completeButton.className = 'btn btn-success mt-3 complete-button';
+            completeButton.textContent = '完成';
+            completeButton.onclick = () => updateFileStatus(currentFileId, 'completed');
+            document.querySelector('.modal-body').appendChild(completeButton);
+        }
+        
+        // 如果是第一页，更新文件状态
+        if (page === 0) {
+            updateFileStatus(currentFileId, 'received').catch(() => {});
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        let errorMessage = '加载数据失败，请重试';
+        
+        if (error.name === 'AbortError') {
+            errorMessage = '请求超时，请检查网络连接后重试';
+        } else if (error.message.includes('Failed to fetch')) {
+            errorMessage = '网络连接失败，请检查网络设置';
+        } else if (error.message.includes('HTTP error')) {
+            // 检查是否为403且内容为禁用查看
+            if (error.message.includes('403')) {
+                errorMessage = '已经展示过该文件，如需重新展示请联系管理员重置！';
+            } else {
+                errorMessage = '服务器响应错误，请稍后重试';
+            }
+        }
+        
+        alert(errorMessage);
+    })
+    .finally(() => {
+        // 移除加载提示
+        loadingToast.remove();
+    });
+}
+
+function updatePageIndicator() {
+    document.getElementById('pageIndicator').textContent = 
+        `第 ${currentPage + 1} 页，共 ${totalPages} 页`;
+}
+
+function updateFileStatus(fileId, newStatus) {
+    return fetch(`/api/files/${fileId}/status`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ status: newStatus })
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(data => {
+                if (data && (data.status === 'already' || (data.message && (data.message.includes('已是目标状态') || data.message.includes('无需更新') || data.message.includes('重复'))))) {
+                    return data;
+                }
+                throw new Error('Status update failed');
+            }).catch(() => {
+                throw new Error('Status update failed');
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (newStatus === 'completed') {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('fileViewerModal'));
+            if (modal) {
+                modal.hide();
+            }
+            alert('文件已完成，2小时后将开放下载功能');
+            setTimeout(() => {
+                location.reload();
+            }, 100);
+        }
+        return data;
+    })
+    .catch(error => {
+        // 不再弹窗，只记录日志
+        console.warn('updateFileStatus error:', error);
+    });
+}
+
+function incrementOrderCount() {
+    fetch('/api/users/increment-order-count', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => {
+        if (!response.ok) return response.json().then(data => { throw data; });
+        return response.json();
+    })
+    .then(data => {
+        location.reload();
+    })
+    .catch(error => {
+        if (error && error.error && error.error.includes('上限')) {
+            document.getElementById('incrementOrderBtn').disabled = true;
+            document.getElementById('orderLimitTip').style.display = '';
+            alert(error.error);
+        } else {
+            alert('操作失败，请重试');
+        }
+    });
+}
+
+// 更新进度条
+function updateProgress(current, total) {
+    const percentage = Math.round((current + 1) / total * 100);
+    const progressBar = document.getElementById('progressBar');
+    progressBar.style.width = `${percentage}%`;
+    progressBar.textContent = `${percentage}%`;
+}
+
+// 更新用户信息
+function updateUserInfo() {
+    fetch('/api/users/current-info')
+    .then(response => response.json())
+    .then(data => {
+        // 获取当前显示的需求单量
+        const currentOrderCount = parseInt(document.querySelector('[data-info="order-count"]').textContent);
+        
+        // 如果新的需求单量大于当前显示的需求单量，播放提示音
+        if (parseInt(data.order_count) > currentOrderCount) {
+            playNotificationSound();
+        }
+        
+        // 更新需求单量显示
+        document.querySelector('[data-info="order-count"]').textContent = data.order_count;
+        
+        // 检查客户端模式是否有变化
+        if (data.client_mode && data.client_mode !== userClientMode) {
+            console.log(`检测到客户端模式变更：${userClientMode} -> ${data.client_mode}`);
+            alert('您的账户模式已被管理员更改，页面将刷新以应用新设置');
+            location.reload();
+        }
+    })
+    .catch(error => console.error('Error updating user info:', error));
+}
+
+function throttle(func, limit) {
+    let inThrottle;
+    return function(...args) {
+        if (!inThrottle) {
+            func.apply(this, args);
+            inThrottle = true;
+            setTimeout(() => inThrottle = false, limit);
+        }
+    }
+}
+
+function extractDeadline(filename) {
+    // 假设格式为 ..._22.30.txt
+    const parts = filename.split('_');
+    const last = parts[parts.length - 1];
+    if (last.endsWith('.txt') && last.includes('.')) {
+        return last.replace('.txt', '');
+    }
+    return null;
+}
+
+function updateTableContent(files) {
+    const tbody = document.querySelector('tbody');
+    
+    const newContent = files.map(file => {
+        const deadline = extractDeadline(file.filename);
+        let idStr = file.display_id;
+        let result = idStr;
+        // 兼容 2025/07/08-01 或 20250708-01
+        if (idStr && idStr.includes('-')) {
+            let datePart = idStr.split('-')[0];
+            let numPart = idStr.split('-')[1];
+            if (datePart.includes('/')) {
+                // 2025/07/08-01
+                let parts = datePart.split('/');
+                if (parts.length === 3) {
+                    result = parts[1] + '/' + parts[2] + '-' + numPart;
+                }
+            } else if (datePart.length === 8) {
+                // 20250708-01
+                result = datePart.substring(4, 6) + '/' + datePart.substring(6, 8) + '-' + numPart;
+            }
+        }
+        let filenameDisplay = file.filename;
+        if (file.filename && file.filename.length > 17) {
+            const last5 = file.filename.endsWith('.txt') ? file.filename.slice(-9, -4) : file.filename.slice(-5);
+            filenameDisplay = file.filename.substring(0, 12) + '...' + last5;
+        } else if (file.filename && file.filename.length > 12) {
+            filenameDisplay = file.filename.substring(0, 12) + '...' + file.filename.slice(-5);
+        }
+        return `
+            <tr data-file-id="${file.id}" class="${file.status}">
+                <td>${result}</td>
+                <td>${filenameDisplay}</td>
+                <td>${file.amount}元</td>
+                <td>${file.count}张</td>
+                <td>
+                    <span class="badge bg-${statusBadgeMap[file.status]} status-badge">
+                        ${statusTextMap[file.status]}
+                    </span>
+                </td>
+                <td>${file.uploaded_at && file.uploaded_at.length > 11 ? file.uploaded_at.substring(5, 16) : file.uploaded_at}</td>
+                <td>
+                    <span class="file-note-display" title="${file.note || '无'}">
+                        ${file.note || '无'}
+                    </span>
+                </td>
+                <td>
+                    ${file.status !== 'revoked' ? (
+                        userClientMode === 'download' ? (
+                            file.status === 'pending' || file.can_download ? (
+                                `<button class="btn btn-sm btn-primary" onclick="downloadFile(${file.id})">\n下载\n</button>`
+                            ) : (file.status === 'received' ? (
+                                `<button class="btn btn-sm btn-success" onclick="updateFileStatus(${file.id}, 'completed')">已完成</button>`
+                            ) : '')
+                        ) : (
+                            (file.status === 'pending' || file.status === 'received') ? (
+                                `<button class="btn btn-sm btn-primary" onclick="showFile(${file.id})">\n展示\n</button>`
+                            ) : ''
+                        )
+                    ) : ''}
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    // 只在内容变化时更新DOM
+    if (tbody && tbody.innerHTML !== newContent) {
+        tbody.innerHTML = newContent;
+    }
+}
+
+function generatePagination(pagination) {
+    const nav = document.querySelector('nav[aria-label="Page navigation"]');
+    if (!nav) return;
+
+    const ul = nav.querySelector('ul.pagination');
+    const newPagination = `
+        <li class="page-item ${!pagination.has_prev ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="changePage(${pagination.prev_num}); return false;">上一页</a>
+        </li>
+        ${Array.from({length: pagination.pages}, (_, i) => i + 1)
+            .filter(i => i === 1 || i === pagination.pages || (i >= pagination.page - 2 && i <= pagination.page + 2))
+            .map(i => `
+                <li class="page-item ${i === pagination.page ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="changePage(${i}); return false;">${i}</a>
+                </li>
+            `).join('')}
+        <li class="page-item ${!pagination.has_next ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="changePage(${pagination.next_num}); return false;">下一页</a>
+        </li>
+    `;
+
+    // 只在内容变化时更新DOM
+    if (ul.innerHTML !== newPagination) {
+        ul.innerHTML = newPagination;
+    }
+}
+
+function updateFileList() {
+    fetch(`/api/files/list?page=${currentPage}&t=${Date.now()}`) // 添加时间戳防止缓存
+    .then(response => response.json())
+    .then(data => {
+        // 首先确保audio元素已正确加载
+        const audio = document.getElementById('notificationSound');
+        if (!audio || !audio.querySelector('source')) {
+            console.error('音频元素未正确加载');
+        }
+        
+        const newData = JSON.stringify(data);
+        
+        // 初始化时，只记录数据不触发通知
+        if (lastData === null) {
+            console.log('初始化文件列表数据');
+            lastData = newData;
+            updateTableContent(data.files);
+            generatePagination(data.pagination);
+            return;
+        }
+        
+        // 当数据发生变化时进行比较
+        if (newData !== lastData) {
+            console.log('检测到文件列表变化，进行对比');
+            
+            try {
+                // 解析数据以进行比较
+                const oldData = JSON.parse(lastData);
+                const oldFileIds = oldData.files.map(f => f.id);
+                const oldPendingFileIds = oldData.files
+                    .filter(f => f.status === 'pending')
+                    .map(f => f.id);
+                
+                // 检查新文件或状态变化为待接收的文件
+                const newPendingFiles = data.files
+                    .filter(file => file.status === 'pending' && !oldPendingFileIds.includes(file.id));
+                
+                // 检查是否有新文件（之前不存在的文件ID）
+                const newFiles = data.files
+                    .filter(file => !oldFileIds.includes(file.id));
+                
+                console.log('当前页面旧文件ID:', oldFileIds);
+                console.log('新的待接收文件数量:', newPendingFiles.length);
+                console.log('检测到全新的文件:', newFiles.length);
+                
+                // 如果有新的待接收文件或新增文件，播放提示音
+                if (newPendingFiles.length > 0 || newFiles.length > 0) {
+                    console.log('检测到新文件或状态变化，播放提示音');
+                    playNotificationSound();
+                }
+            } catch (e) {
+                console.error('比较文件列表失败:', e);
+            }
+            
+            // 检查是否有正在查看的文件被撤回
+            if (window.currentFileId) {
+                const currentFile = data.files.find(f => f.id === currentFileId);
+                if (currentFile && currentFile.status === 'revoked') {
+                    // 关闭模态框并刷新页面
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('fileViewerModal'));
+                    if (modal) {
+                        modal.hide();
+                    }
+                    location.reload();
+                    return;
+                }
+            }
+            
+            // 无论如何都更新表格和分页
+            updateTableContent(data.files);
+            generatePagination(data.pagination);
+        }
+        
+        // 更新缓存的数据
+        lastData = newData;
+    })
+    .catch(error => console.error('Error updating file list:', error));
+}
+
+function changePage(page) {
+    currentPage = page;
+    lastData = null; // 强制更新数据
+    updateFileList();
+}
+
+const throttledUpdateFileList = throttle(updateFileList, 1000);
+const throttledUpdateUserInfo = throttle(updateUserInfo, 1000);
+
+// 播放提示音函数
+function playNotificationSound() {
+    console.log('播放客户端提示音...');
+    const audio = initAudioSystem(); // 使用初始化函数确保音频元素存在
+    
+    // 先重置以确保可以重新播放
+    audio.pause();
+    audio.currentTime = 0;
+    
+    // 播放提示音
+    return audio.play()
+        .then(() => {
+            console.log('提示音播放成功');
+            return true;
+        })
+        .catch(e => {
+            console.error('提示音播放失败:', e);
+            return false;
+        });
+}
+
+// 播放通知内容提示音
+function playNotificationMessageSound() {
+    let audio = document.getElementById('notificationMessageSound');
+    if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = 'notificationMessageSound';
+        const source = document.createElement('source');
+        source.src = "/static/sounds/notification_message.mp3";
+        source.type = "audio/mpeg";
+        audio.appendChild(source);
+        audio.preload = "auto";
+        document.body.appendChild(audio);
+    }
+    audio.pause();
+    audio.currentTime = 0;
+    audio.play().catch(e => { console.error('通知内容提示音播放失败:', e); });
+}
+// 用户首次交互后激活音频播放
+if (typeof window._audioActivated === 'undefined') {
+    window._audioActivated = false;
+    document.addEventListener('click', function enableAudio() {
+        let audio = document.getElementById('notificationMessageSound');
+        if (audio) {
+            audio.volume = 0;
+            audio.play().catch(()=>{});
+            audio.pause();
+            audio.currentTime = 0;
+            audio.volume = 1.0;
+        }
+        window._audioActivated = true;
+        document.removeEventListener('click', enableAudio);
+    }, { once: true });
+}
+
+// 初始化音频系统
+function initAudioSystem() {
+    // 检查音频元素是否存在，如果不存在则创建
+    let audio = document.getElementById('notificationSound');
+    if (!audio) {
+        console.log('创建新的通知音频元素');
+        audio = document.createElement('audio');
+        audio.id = 'notificationSound';
+        
+        // 添加音频源
+        const source = document.createElement('source');
+        source.src = "/static/notification.mp3";
+        source.type = "audio/mpeg";
+        audio.appendChild(source);
+        
+        // 设置音频属性
+        audio.preload = "auto";
+        
+        // 添加到DOM
+        document.body.appendChild(audio);
+    }
+    return audio;
+}
+
+// 个人信息旁通知栏自动刷新
+let lastNotificationContent = '';
+function updateNotificationBarContent(content) {
+    const bar = document.getElementById('notificationBarContent');
+    if (bar) {
+        bar.textContent = content || '暂无通知';
+    }
+    // 新通知内容变化时播放提示音
+    if (content && content !== lastNotificationContent) {
+        playNotificationMessageSound();
+    }
+    lastNotificationContent = content;
+}
+function pollNotificationBar() {
+    fetch('/api/notifications?t=' + Date.now())
+        .then(response => response.json())
+        .then(data => {
+            const content = data.notification && data.notification.content ? data.notification.content.trim() : '';
+            const notificationId = data.notification && data.notification.id ? data.notification.id : null;
+            updateNotificationBarContent(content);
+            // 只在通知ID变化时提示
+            if (notificationId && notificationId !== lastNotificationId) {
+                playNotificationMessageSound();
+                lastNotificationId = notificationId;
+            }
+        });
+}
+pollNotificationBar();
+setInterval(pollNotificationBar, 5000);
+
+function initialize() {
+    console.log('初始化客户端页面...');
+    
+    // 初始加载
+    updateFileList();
+    updateUserInfo();
+    
+    // 定时更新
+    setInterval(throttledUpdateFileList, 3000);
+    setInterval(throttledUpdateUserInfo, 2000);
+}
+
+// 执行初始化
+initialize();
+</script>
+{% endif %}
+{% endblock content %}
